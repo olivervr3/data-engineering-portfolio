@@ -1,6 +1,6 @@
 # NYC TLC batch analytics
 
-**Status: Design stage.** Implementation pending.
+**Status: In progress.** Monthly ingestion and download-size validation are implemented. The source manifest and analytical queries are pending.
 
 ## Problem
 
@@ -26,6 +26,18 @@ Python will acquire a specified year and month and record the source URL, retrie
 1. **Acquisition and baseline query:** parameterized download of one monthly file and the zone lookup; a manifest and a documented local command; trip counts by pickup hour and zone.
 2. **Analytical model:** typed staging, documented grain and exclusion rules, fact and dimension tables, a demand mart, and a second source month to test changes across files.
 3. **Repeatable operation:** month-level reload and backfill, automated quality checks, a clean-environment runbook, and recorded input size and runtime.
+
+## Ingestion tests
+
+From this project directory, with its Python 3.13 virtual environment activated, run:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The suite uses Python's standard library. Each test runs a temporary copy of `ingest.py` from a separate working directory, using simulated HTTP responses. It checks successful downloads, repeat runs, interrupted transfers, HTTP errors, timeouts, missing content-length headers, truncated responses, and invalid CLI arguments. Test payloads are small byte strings; Parquet structure and analytical data quality are outside these tests.
+
+When the source declares `Content-Length`, ingestion compares it with the completed temporary file's size before publishing the download. The truncated-response regression test checks that a mismatch raises an error and removes the incomplete file. When the header is absent, ingestion skips this size comparison; matching sizes alone do not validate Parquet structure or data quality.
 
 ## Acceptance criteria
 
