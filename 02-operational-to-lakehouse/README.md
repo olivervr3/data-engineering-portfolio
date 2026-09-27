@@ -1,40 +1,43 @@
-# Project 2 — Operational database to lakehouse
+# Operational database to lakehouse
 
-**Status: planned.** Simulate an operational system, then turn its changes into reliable analytical tables using Python, Databricks, Spark, and Delta Lake. All customers, products, and orders are **synthetic** and generated deterministically. This project demonstrates incremental data engineering; it does not claim access to a real employer system.
+**Status: Design stage.** Implementation pending.
 
-## Question and design
+## Problem
 
-Can an analytical system reflect inserts, updates, and deletes from an operational database without losing or duplicating changes? Start with SQLite locally so the source is easy to reproduce. Build a small append-only change table or outbox with a monotonic event ID. Extract changes in bounded batches. Upload a small batch to Databricks Free Edition, then build bronze, silver, and gold Delta tables. This outbox is a simulation of source changes, **not log-based CDC**.
+Analytical tables need to reflect inserts, updates, cancellations, and deletes from a transactional source while tolerating repeated batches and interrupted runs. The proposed source contains deterministic, **synthetic** customers, products, and orders.
+
+## Proposed architecture
 
 ```mermaid
 flowchart LR
-    APP[Synthetic SQLite transactions] --> OUTBOX[Change table]
-    OUTBOX --> EXPORT[Python incremental export]
-    EXPORT --> BRONZE[Delta bronze]
-    BRONZE --> SILVER[Delta silver MERGE]
+    DB[Synthetic SQLite transactions] --> EVENTS[Append-only change table]
+    EVENTS --> EXPORT[Python incremental export]
+    EXPORT --> FILES[Batch files + manifest]
+    FILES --> BRONZE[Databricks Delta bronze]
+    BRONZE --> SILVER[Delta silver current state]
     SILVER --> GOLD[Gold order metrics]
-    GOLD --> CHECK[Reconciliation + data tests]
+    EVENTS --> CHECK[Source-target reconciliation]
+    GOLD --> CHECK
 ```
 
-## Milestone 1 — Local source and extraction
+The SQLite change table will assign a monotonic event ID to each source mutation. Python will export bounded batches and preserve a durable manifest so an exported file can be retried if a later upload or transformation fails. Bronze will retain the event history. Silver will apply the latest event per business key with Delta `MERGE`; tombstones will retain delete event IDs so an older replay cannot resurrect a deleted row. Gold will calculate order counts and revenue under documented cancellation and deletion rules. This is an application-maintained change feed, **not log-based CDC**.
 
-- Generate deterministic customers, products, and orders. Record inserts, updates, and deletes in a change table.
-- Implement an extractor that checkpoints the last successfully exported event. State whether delivery is at-least-once and how the destination removes duplicates.
-- Demonstrate an empty batch, a normal batch, an interrupted run, and replay after restart without missing changes.
+The proposed hosted target is [Databricks Free Edition](https://docs.databricks.com/aws/en/getting-started/free-edition). Its [compute quotas and restricted outbound access](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations) make local export and file upload a deliberate boundary. Only synthetic data will be used.
 
-**Review gate:** all source events are represented once in the logical target state after replay; provide a query or test proving it.
+## Implementation milestones
 
-## Milestone 2 — Delta processing
+1. **Transactional source:** deterministic schema, seed data, change-table capture for insert/update/delete, and source queries for reconciliation.
+2. **Incremental export:** bounded extraction, durable batch manifest, recovery after interruption, and repeated-delivery handling by event ID.
+3. **Lakehouse processing:** bronze event table, silver current-state `MERGE`, gold metrics, and a Databricks Job with documented triggering and failure inspection.
 
-- Load a small exported batch into a bronze table in [Databricks Free Edition](https://docs.databricks.com/aws/en/getting-started/free-edition). Use only synthetic data. The free tier has [quotas and network limits](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations), so local export and upload are acceptable.
-- Apply changes to a silver current-state table with Delta `MERGE`; define delete behavior. Build a gold aggregate for order count and revenue, with explicit handling for cancellations.
-- Check event uniqueness, expected current-state counts, null keys, and source-to-target totals. Show how a late event or replay behaves.
+## Acceptance criteria
 
-**Review gate:** two runs with the same input produce the same silver state and gold metrics; an update and a delete change those metrics as expected.
+- An empty batch, an ordinary batch, an interrupted export, and a repeated batch produce no missed logical changes.
+- Every source event is traceable in bronze; replaying the same event IDs leaves the silver state and gold metrics unchanged.
+- An update, cancellation, and delete each produce the expected current state and aggregate; replaying an older event cannot reverse a newer change or tombstone.
+- Null business keys, duplicate event IDs, and source-to-target count or total mismatches are detected by checks.
+- A clean-environment runbook reproduces the synthetic source, export, load, job run, reconciliation, and recovery procedure once implemented.
 
-## Milestone 3 — Operation and explanation
+## Scope and tradeoffs
 
-- Run the Databricks transformation as a Job. Record how to trigger it, identify its run, inspect failures, and rerun safely.
-- Document the incremental watermark, schema, data tests, reconciliation queries, resource limits, and what would change for a production source.
-
-**Done when:** another engineer can create the synthetic source, export changes, load them into Databricks, reproduce the tables, recover a failed/replayed batch, and verify the same final state.
+SQLite and deterministic seed data make the source inexpensive to reproduce. File transfer into Databricks introduces a manual batch boundary in the first version. The scope is correctness and recovery on bounded synthetic batches; continuous capture is covered by the CDC extension.
