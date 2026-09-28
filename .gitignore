@@ -8,8 +8,8 @@ __pycache__/
 .env.*
 
 # Local data and generated output
-data/raw/
-data/processed/
+**/data/raw/
+**/data/processed/
 *.parquet
 *.duckdb
 *.db
